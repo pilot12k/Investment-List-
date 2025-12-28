@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- HELPER FUNCTIONS ---
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user has 'admin' custom claim
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.keys().hasAny(['admin']) && request.auth.token.admin == true) ||
+        request.auth.token.email == 'admin@cashindeandassociates.com'
+      );
+    }
+
+    // Check if user is 'staff'
+    function isStaff() {
+      return isAuthenticated() && request.auth.token.keys().hasAny(['role']) && request.auth.token.role == 'staff';
+    }
+
+    // Validate Financial Input Data (Schema Enforcement)
+    function isValidDeposit() {
+      let data = request.resource.data;
+      return 
+        // Required Fields
+        data.keys().hasAll(['full_name', 'mobile_no', 'amount', 'created_at', 'deposit_type']) &&
+        
+        // Data Types & Constraints
+        data.full_name is string && data.full_name.size() > 2 && data.full_name.size() < 100 &&
+        data.mobile_no is string && data.mobile_no.matches('^[0-9]{10}$') &&
+        data.amount is number && data.amount > 0 && data.amount < 100000000 && // Cap at 10Cr for sanity
+        data.deposit_type is string &&
+        
+        // Audit Fields (Must be set correctly by server/client)
+        data.created_at is timestamp &&
+        data.created_at == request.time; // Prevent backdating
+    }
+
+    // --- COLLECTION RULES ---
+
+    match /deposits/{depositId} {
+      // 1. CREATE: Public Intake vs Authenticated Client
+      // ideally: Allow ONLY authenticated clients to create
+      // For now (Intake Model): Allow public creation BUT enforce strict schema
+      allow create: if isValidDeposit();
+
+      // 2. READ: Role-Based Access Control (RBAC)
+      // Admins: Can read all
+      // Staff: Can read all
+      // Clients: Can ONLY read their own records (requires 'uid' field on doc)
+      allow read: if isAdmin() || isStaff() || (isAuthenticated() && resource.data.uid == request.auth.uid);
+
+      // 3. UPDATE: Restricted
+      // Admins: Can update status/review
+      // Staff: Can update notes only
+      // Clients: NO update access after submission (Financial Integrity)
+      allow update: if isAdmin();
+
+      // 4. DELETE: Admin Only
+      allow delete: if isAdmin();
+    }
+
+    // Audit Logs (Immutable)
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if false; // Only manageable via Cloud Functions (System)
+      allow update, delete: if false; // NEVER delete audit logs
+    }
+
+    // Deny all else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

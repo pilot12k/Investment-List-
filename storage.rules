@@ -1,0 +1,31 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper: User checks
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    // Sensitive Documents (KYC, Receipts)
+    // Structure: /sensitive_docs/{userId}/{fileName}
+    match /sensitive_docs/{userId}/{fileName} {
+      
+      // READ: Owner or Admin/Staff
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+
+      // WRITE: Owner only (Upload)
+      allow write: if isAuthenticated() && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024 // Max 5MB
+                   && request.resource.contentType.matches('application/pdf|image/.*'); // PDF or Images only
+    }
+
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
