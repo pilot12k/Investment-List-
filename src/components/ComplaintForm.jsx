@@ -188,10 +188,8 @@ export default function ComplaintForm({ onSuccess }) {
 
         // Future Date Validation
         if (currentEntry.depositDate) {
-            const selectedDate = new Date(currentEntry.depositDate);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            if (selectedDate > today) {
+            const todayStr = new Date().toLocaleDateString('sv-SE');
+            if (currentEntry.depositDate > todayStr) {
                 alert("Deposit date cannot be in the future.");
                 return;
             }
